@@ -30,10 +30,13 @@ pip install -r requirements.txt
 python collyrium.py -i [input] -o [out] -t [threads]
 ```
 `-i [Path to the input file (Supports IP/Ranges/CIDR)]`
+
 `-o [Path to the output file (Can be written in existing files)`
+
 `-t [Threads number (Default=128)]`
 
 Output format: `[Type] login:password@ip:port`
 
 #Credits:
+
 Made by dansiup44 [GPL v3.0 License]
