@@ -35,6 +35,8 @@ python collyrium.py -i [input] -o [out] -t [threads]
 
 `-t [Threads number (Default=128)]`
 
+`-h - Help`
+
 Output format: `[Type] login:password@ip:port`
 
 <h1>Credits:</h1>
