@@ -26,6 +26,20 @@ cd collyrium
 pip install -r requirements.txt
 ```
 
+<h1>Configuration:</h1>
+
+Configs are used in the following format:
+
+```
+string
+string
+string
+```
+
+- Logins: `config/login.cfg`
+- Passwords: `config/pass.cfg`
+- Ports: `config/ports.cfg`
+
 <h1>Usage:</h1>
 
 ```bash
