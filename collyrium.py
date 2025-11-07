@@ -41,8 +41,8 @@ SNAPSHOT_PATHS = [
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 HTTP_TIMEOUT = 2
-SOCKET_TIMEOUT = 0.5
-PATH_PARALLEL_WORKERS = 64
+SOCKET_TIMEOUT = 1
+PATH_PARALLEL_WORKERS = 128
 CRED_PARALLEL_WORKERS = 256
 
 stop_event = threading.Event()
@@ -319,54 +319,107 @@ def main():
     
     ip_port_map = {}
     unique_ips = set()
+    parsed_count = 0
+    error_count = 0
     
-    for line in raw_lines:
+    for line_num, line in enumerate(raw_lines, 1):
         line = line.strip()
         if not line or line.startswith('#'):
             continue
+        
         try:
-            if '/' in line:
-                net = ipaddress.ip_network(line, strict=False)
-                for ip_obj in net.hosts():
-                    ip = str(ip_obj)
+            line = ' '.join(line.split())
+            if ':' in line and '/' not in line and '-' not in line:
+                parts = line.split(':')
+                if len(parts) == 2:
+                    ip_part = parts[0].strip()
+                    port_part = parts[1].strip()
+                    
+                    ipaddress.IPv4Address(ip_part)
+                    ip = ip_part
+                    
+                    port = int(port_part)
+                    if not (1 <= port <= 65535):
+                        log_error(f"Line {line_num}: Port out of range in '{line}'")
+                        error_count += 1
+                        continue
+                    
                     unique_ips.add(ip)
                     if ip not in ip_port_map:
                         ip_port_map[ip] = set()
-            elif '-' in line and line.count('-') == 1:
-                start_ip, end_ip = line.split('-')
-                start = ipaddress.IPv4Address(start_ip.strip())
-                end = ipaddress.IPv4Address(end_ip.strip())
-                current = int(start)
-                while current <= int(end):
-                    ip = str(ipaddress.IPv4Address(current))
-                    unique_ips.add(ip)
-                    if ip not in ip_port_map:
-                        ip_port_map[ip] = set()
-                    current += 1
-            elif ':' in line and line.count(':') == 1:
-                ip_part, port_part = line.split(':', 1)
-                ip = ip_part.strip()
-                port = int(port_part.strip())
-                if not (1 <= port <= 65535):
-                    log_error(f"Port out of range in input: {line}")
+                    ip_port_map[ip].add(port)
+                    parsed_count += 1
                     continue
-                ipaddress.IPv4Address(ip)
-                unique_ips.add(ip)
-                if ip not in ip_port_map:
-                    ip_port_map[ip] = set()
-                ip_port_map[ip].add(port)
+            
+            elif '/' in line and ':' not in line and '-' not in line:
+                try:
+                    network = ipaddress.ip_network(line, strict=False)
+                    for ip_obj in network.hosts():
+                        ip = str(ip_obj)
+                        unique_ips.add(ip)
+                        if ip not in ip_port_map:
+                            ip_port_map[ip] = set()
+                        ip_port_map[ip].update(ports)
+                    parsed_count += 1
+                    continue
+                except ValueError as e:
+                    log_error(f"Line {line_num}: Invalid CIDR '{line}' - {e}")
+                    error_count += 1
+                    continue
+            
+            elif '-' in line and line.count('-') == 1 and ':' not in line and '/' not in line:
+                try:
+                    start_ip, end_ip = line.split('-')
+                    start_ip = start_ip.strip()
+                    end_ip = end_ip.strip()
+                    
+                    start = ipaddress.IPv4Address(start_ip)
+                    end = ipaddress.IPv4Address(end_ip)
+                    
+                    current_ip = start
+                    while current_ip <= end:
+                        ip = str(current_ip)
+                        unique_ips.add(ip)
+                        if ip not in ip_port_map:
+                            ip_port_map[ip] = set()
+                        ip_port_map[ip].update(ports)
+                        current_ip += 1
+                    
+                    parsed_count += 1
+                    continue
+                except ValueError as e:
+                    log_error(f"Line {line_num}: Invalid IP range '{line}' - {e}")
+                    error_count += 1
+                    continue
+            
             else:
-                ipaddress.IPv4Address(line)
-                ip = line
-                unique_ips.add(ip)
-                if ip not in ip_port_map:
-                    ip_port_map[ip] = set()
-        except Exception:
-            log_error(f"Invalid input format: {line}")
+                try:
+                    ipaddress.IPv4Address(line)
+                    ip = line
+                    unique_ips.add(ip)
+                    if ip not in ip_port_map:
+                        ip_port_map[ip] = set()
+                    ip_port_map[ip].update(ports)
+                    parsed_count += 1
+                    continue
+                except ValueError:
+                    if '.' in line and not any(c.isalpha() for c in line.replace('.', '')):
+                        log_error(f"Line {line_num}: Invalid IP format '{line}'")
+                        error_count += 1
+                        continue
+                    else:
+                        log_error(f"Line {line_num}: Unsupported format '{line}'")
+                        error_count += 1
+                        continue
+                        
+        except Exception as e:
+            log_error(f"Line {line_num}: Unexpected error parsing '{line}' - {e}")
+            error_count += 1
+            continue
     
     for ip in ip_port_map:
         if not ip_port_map[ip]:
-            ip_port_map[ip] = set(ports)
+            ip_port_map[ip].update(ports)
     
     total_unique_ips = len(unique_ips)
     ip_completed = {ip: set() for ip in ip_port_map}
@@ -374,6 +427,11 @@ def main():
     if total_unique_ips == 0:
         log_error("No valid targets generated!")
         return
+    
+    safe_print(f"[+] Parsed {parsed_count} lines successfully")
+    if error_count > 0:
+        safe_print(f"[!] Failed to parse {error_count} lines")
+    safe_print(f"[+] Generated {total_unique_ips} unique IP targets")
     
     target_iter = iter_targets(ip_port_map)
     os.makedirs(output_path, exist_ok=True)
@@ -489,4 +547,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
